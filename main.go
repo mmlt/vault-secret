@@ -18,9 +18,13 @@ package main
 
 import (
 	"flag"
-	"github.com/mmlt/vault-secret/pkg/hashivault"
+	"fmt"
+	"github.com/mmlt/vault-secret/controllers"
 	"github.com/mmlt/vault-secret/pkg/mutator"
+	"github.com/mmlt/vault-secret/pkg/vault/hashivault"
+	"io/ioutil"
 	"os"
+	"path/filepath"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	//_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
@@ -30,54 +34,85 @@ import (
 )
 
 var (
-	//scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
+
+	usage = `%[1]s %[2]s
+%[1]s is a Mutating Admission Controller that populates core v1 Secret data with values read from HashiCorp Vault.
+
+Secret annotations:
+  vault.mmlt.nl/inject="true" - Enable the injection of data fields. This should be set to a true or false value. Defaults to false.
+  vault.mmlt.nl/inject-path="path/to/secret" - The path in Vault where the secret is located relative to vault-secret-path.
+  vault.mmlt.nl/inject-fields="user=name,pw=password" - A comma separated list of k8s secret field name = vault secret field name pairs.
+
+Commandline flags:
+`
+	// Version is set during build.
+	Version string
 )
 
-/*
-func init() {
-	_ = clientgoscheme.AddToScheme(scheme)
-
-	_ = corev1.AddToScheme(scheme)
-	// +kubebuilder:scaffold:scheme
-}
-*/
-
 func main() {
-	var metricsAddr string
-	var enableLeaderElection bool
-	flag.StringVar(&metricsAddr, "metrics-addr", ":8080", "The address the metric endpoint binds to.")
-	flag.BoolVar(&enableLeaderElection, "enable-leader-election", false,
-		"Enable leader election for controller manager. "+
-			"Enabling this will ensure there is only one active controller manager.")
+	vaultURL := flag.String("vault-url", "https://vault.example.com",
+		"The URL of the Vault server")
+	vaultCAFile := flag.String("vault-ca-file", "/var/run/vault/ca.pem",
+		"The path of the TLS CA")
+	vaultTLSInsecure := flag.Bool("vault-tls-insecure", false,
+		"Allow insecure TLS connections")
+	vaultAuthPath := flag.String("vault-auth-path", "kubernetes",
+		"The path of the Vault kubeauth credential backend mount")
+	vaultRole := flag.String("vault-role", "vaultsecret",
+		"The template that results in a role name. Arguments: {ns} for namespace, {n} for name. \n"+
+			"for example \"vaultsecret-{ns}\" produces \"vaultsecret-default\" when the Secret is in namespace \"default\"")
+	vaultSecretPath := flag.String("vault-secret-path", "secret/{ns}/{p}",
+		"The template that results in a Vault path.\n"+
+			"Arguments: {ns} for namespace, {n} for name, {p} for the vault.mmlt.nl/inject-path annotation value")
+	metricsAddr := flag.String("metrics-addr", ":8080",
+		"The address the metric endpoint binds to.")
+	//enableLeaderElection := flag.Bool("enable-leader-election", false,
+	//	"Enable leader election for controller manager. "+
+	//		"Enabling this will ensure there is only one active controller manager.")
+	flag.Usage = func() {
+		_, _ = fmt.Fprintf(os.Stderr, usage, filepath.Base(os.Args[0]), Version)
+		flag.PrintDefaults()
+	}
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 
+	ctrl.Log.Info("starting", "version", Version)
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		//Scheme:             scheme,
-		MetricsBindAddress: metricsAddr,
+		MetricsBindAddress: *metricsAddr,
 		Port:               9443,
 		//LeaderElection:     enableLeaderElection,
 		//LeaderElectionID:   "c87fed36.mmlt.nl",
 	})
-	if err != nil {
-		setupLog.Error(err, "creating manager")
-		os.Exit(1)
-	}
+	exitWhenError("creating manager", err)
 
-	// Setup webhook.
+	vaultCA, err := ioutil.ReadFile(*vaultCAFile)
+	exitWhenError("reading vault-ca-file", err)
+
+	client, err := hashivault.New(*vaultURL, string(vaultCA), *vaultTLSInsecure)
+	exitWhenError("creating Vault client", err)
+
 	hookServer := mgr.GetWebhookServer()
-	hookServer.Register("/mutate-v1-secret", &webhook.Admission{
+	hookServer.Register(controllers.WebhookPath, &webhook.Admission{
 		Handler: &mutator.SecretMutator{
-			Client: mgr.GetClient(),
-			Vault:  hashivault.FakeVault{}, //TODO real vault
+			Vault:           client,
+			VaultAuthPath:   *vaultAuthPath,
+			VaultRole:       *vaultRole,
+			VaultSecretPath: *vaultSecretPath,
 		},
 	})
 
 	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		setupLog.Error(err, "start manager")
+	err = mgr.Start(ctrl.SetupSignalHandler())
+	exitWhenError("start manager", err)
+}
+
+func exitWhenError(msg string, err error) {
+	if err != nil {
+		setupLog.Error(err, msg)
 		os.Exit(1)
 	}
 }

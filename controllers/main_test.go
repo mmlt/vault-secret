@@ -1,66 +1,59 @@
-/*
-
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package controllers
 
 import (
+	"context"
+	"fmt"
 	"github.com/mmlt/vault-secret/pkg/mutator"
+	"github.com/mmlt/vault-secret/pkg/vault"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	"os"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
-	"sigs.k8s.io/controller-runtime/pkg/envtest/printer"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"testing"
-	// +kubebuilder:scaffold:imports
 )
 
-// These tests use Ginkgo (BDD-style Go testing framework). Refer to
-// http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
+// TestMain instantiates the following vars for usage in tests.
+var (
+	cfg       *rest.Config
+	k8sClient client.Client
+	testEnv   *envtest.Environment
+)
 
-var cfg *rest.Config
-var k8sClient client.Client
-var testEnv *envtest.Environment
+// Tests use the following config.
+var (
+	// When true the kube/config current context cluster will be used.
+	// When false the envtest apiserver will be used (NB. doesn't support tokenreview so Vault kubeauth won't work)
+	useExistingCluster = true
+	// Namespace and name for test resources.
+	testNSN = types.NamespacedName{
+		Namespace: "default",
+		Name:      "test",
+	}
 
-func TestAPIs(t *testing.T) {
-	RegisterFailHandler(Fail)
+	testCtx = context.Background()
+)
 
-	RunSpecsWithDefaultAndCustomReporters(t,
-		"Controller Suite",
-		[]Reporter{printer.NewlineReporter{}})
-}
+func TestMain(m *testing.M) {
+	// Setup.
+	RegisterFailHandler(Fail) //TODO remove Gomega
 
-var _ = BeforeSuite(func(done Done) {
-	logf.SetLogger(zap.LoggerTo(GinkgoWriter, true))
+	//logf.SetLogger(zap.LoggerTo(GinkgoWriter, true)) TODO
 
-	const webhookPath = "/mutate-v1-secret"
-	var webhookInstallOptions = testWebhookInstallOptions(webhookPath)
-
-	By("setting up the test environment")
 	testEnv = &envtest.Environment{
-		WebhookInstallOptions: webhookInstallOptions,
+		UseExistingCluster:    &useExistingCluster,
+		WebhookInstallOptions: webhookInstallOptions(WebhookPath),
+		//AttachControlPlaneOutput: true,
+		//KubeAPIServerFlags:    append(envtest.DefaultKubeAPIServerFlags, "--log-file=/home/pietere/kube-apiserver-envtest.log", "-v=3"),
 	}
 
 	var err error
@@ -71,11 +64,25 @@ var _ = BeforeSuite(func(done Done) {
 	err = corev1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
-	// +kubebuilder:scaffold:scheme
-
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
+
+	fmt.Println(cfg.Host)
+
+	// Run.
+	r := m.Run()
+
+	// Teardown.
+	err = testEnv.Stop()
+	Expect(err).NotTo(HaveOccurred())
+
+	os.Exit(r)
+}
+
+// TestStartManager starts a Manager with the provided vault.
+func testManager(t *testing.T, vault vault.Loginer, stop <-chan struct{}) {
+	t.Helper()
 
 	// Setup manager (similar to main.go)
 
@@ -91,36 +98,31 @@ var _ = BeforeSuite(func(done Done) {
 
 	// Setup webhook.
 	hookServer := mgr.GetWebhookServer()
-	hookServer.Register(webhookPath, &webhook.Admission{
+	hookServer.Register(WebhookPath, &webhook.Admission{
 		Handler: &mutator.SecretMutator{
-			Client: mgr.GetClient(),
-			Vault: testVault(map[string][]byte{
-				"one": []byte("first-value"),
-				"two": []byte("second-value"),
-			}),
+			Vault:           vault,
+			VaultAuthPath:   "kubernetes",
+			VaultRole:       "vaultsecret",
+			VaultSecretPath: "{p}",
 		},
 	})
 
 	// Start manager.
 	go func() {
 		defer GinkgoRecover()
-		err = mgr.Start(ctrl.SetupSignalHandler())
+		err = mgr.Start(stop)
 		Expect(err).NotTo(HaveOccurred())
 	}()
 
-	By("waiting for webhook to be serving")
-	envtest.WaitForWebhooks(mgr.GetConfig(), webhookInstallOptions.MutatingWebhooks, webhookInstallOptions.ValidatingWebhooks, webhookInstallOptions)
-
-	close(done)
-}, 60)
-
-var _ = AfterSuite(func() {
-	By("tearing down the test environment")
-	err := testEnv.Stop()
+	//By("waiting for webhook to be serving")
+	t.Log("waiting for webhook to be serving")
+	o := webhookInstallOptions(WebhookPath)
+	err = envtest.WaitForWebhooks(mgr.GetConfig(), o.MutatingWebhooks, o.ValidatingWebhooks, o)
 	Expect(err).NotTo(HaveOccurred())
-})
+}
 
-func testWebhookInstallOptions(webhookPath string) envtest.WebhookInstallOptions {
+// WebhookInstallOptions returns the options to configure a test environment.
+func webhookInstallOptions(webhookPath string) envtest.WebhookInstallOptions {
 	failPolicy := admissionregistrationv1.Fail
 
 	return envtest.WebhookInstallOptions{
@@ -159,10 +161,4 @@ func testWebhookInstallOptions(webhookPath string) envtest.WebhookInstallOptions
 			},
 		},
 	}
-}
-
-type testVault map[string][]byte
-
-func (v testVault) Get(namespace, name, path string) (map[string][]byte, error) {
-	return v, nil
 }
