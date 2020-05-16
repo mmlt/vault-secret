@@ -19,19 +19,19 @@ See `controllers/vault_test.go testVault()`
 
 ### Create a Secret
 To get the data fields of a Secret populated it has to be annotated;
-```
+```yaml
 apiVersion: v1
 kind: Secret
 metadata:
   name: my-secret
   annotations:
-    vault.mmlt.nl/inject="true"
-	vault.mmlt.nl/inject-path="secret/path/to/secret"
-	vault.mmlt.nl/inject-fields="user=name,pw=password"
-data:
+    vault.mmlt.nl/inject: "true"
+    vault.mmlt.nl/inject-path: "secret/path/to/secret"
+    vault.mmlt.nl/inject-fields: "user=name,pw=password"
+
 ```
 
-## Developing
+## Developing: 
 Prerequisite: [kubebuilder](https://kubebuilder.io) for code generation and testenv binaries.
 
 E2E tests:

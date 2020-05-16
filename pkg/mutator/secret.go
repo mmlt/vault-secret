@@ -3,6 +3,7 @@ package mutator
 import (
 	"context"
 	"encoding/json"
+	"github.com/go-logr/logr"
 	"github.com/mmlt/vault-secret/pkg/vault"
 	"net/http"
 	"strings"
@@ -31,6 +32,8 @@ type SecretMutator struct {
 	// Vault accessor.
 	Vault vault.Loginer
 
+	Log logr.Logger
+
 	// Decoder for incoming k8s objects.
 	decoder *admission.Decoder
 }
@@ -53,38 +56,51 @@ func (m *SecretMutator) Handle(ctx context.Context, req admission.Request) admis
 	// Enable the injection of data fields. This should be set to a true or false value. Defaults to false.
 	enabled := secret.Annotations["vault.mmlt.nl/inject"]
 	// The path in Vault where the secret is located relative to VaultSecretPath.
-	path := secret.Annotations["vault.mmlt.nl/inject-path"]
+	rpath := secret.Annotations["vault.mmlt.nl/inject-path"]
 	// A comma separated list of k8s secret field name = vault secret field name pairs.
 	fields := secret.Annotations["vault.mmlt.nl/inject-fields"]
 
-	if enabled != "true" || path == "" || fields == "" {
+	if enabled != "true" || rpath == "" || fields == "" {
 		// not properly annotated, do not process this secret.
 		return admission.Allowed("")
 	}
 
-	c, err := m.Vault.Login(m.VaultAuthPath, replaceNSN(m.VaultRole, secret.Namespace, secret.Name))
+	role := replaceNSN(m.VaultRole, secret.Namespace, secret.Name)
+	path := replaceNSNP(m.VaultSecretPath, secret.Namespace, secret.Name, rpath)
+
+	c, err := m.Vault.Login(m.VaultAuthPath, role)
 	if err != nil {
+		m.Log.Error(err, "mutate/login")
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 
 	_ = ctx // use in Get() when github.com/hashicorp/vault/api.Read() supports context.
-	data, err := c.Get(replaceNSNP(m.VaultSecretPath, secret.Namespace, secret.Name, path))
+	data, err := c.Get(path)
 	if err != nil {
+		m.Log.Error(err, "mutate/get")
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 
+	if len(data) > 0 && secret.Data == nil {
+		secret.Data = make(map[string][]byte, len(data))
+	}
 	for _, p := range strings.Split(fields, ",") {
 		v := strings.Split(p, "=")
 		if len(v) != 2 {
 			continue
 		}
-		secret.Data[v[0]] = []byte(data[v[1]])
+		if d, ok := data[v[1]]; ok {
+			secret.Data[v[0]] = []byte(d)
+		}
 	}
 
 	js, err := json.Marshal(secret)
 	if err != nil {
+		m.Log.Error(err, "mutate/marshal")
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
+
+	m.Log.Info("mutate", "secret", secret.Namespace+"/"+secret.Name, "role", role, "path", path, "vault", len(data), "secret", len(secret.Data))
 
 	return admission.PatchResponseFromRaw(req.Object.Raw, js)
 }
@@ -96,6 +112,7 @@ func (m *SecretMutator) InjectDecoder(d *admission.Decoder) error {
 }
 
 // ReplaceNSNP replaces {ns} with namespace, {n} with name and {p} with path and returns the result.
+// NB. {p} itself may contain {ns}, {n}
 func replaceNSNP(in, namespace, name, path string) string {
 	s := strings.ReplaceAll(in, "{p}", path)
 	return replaceNSN(s, namespace, name)

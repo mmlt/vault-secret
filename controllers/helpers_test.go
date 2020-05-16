@@ -8,16 +8,14 @@ import (
 	"testing"
 )
 
-func testCreateSecret(t *testing.T, annotations map[string]string) {
+func testCreateSecret(t *testing.T, annotations map[string]string, data map[string][]byte) {
 	t.Helper()
 
 	testDeleteSecret(t)
 	secret := &corev1.Secret{}
 	secret.Namespace = testNSN.Namespace
 	secret.Name = testNSN.Name
-	secret.Data = map[string][]byte{
-		"shouldNotChange": []byte("value"),
-	}
+	secret.Data = data
 	secret.Annotations = annotations
 	err := k8sClient.Create(testCtx, secret)
 	assert.NoError(t, err)

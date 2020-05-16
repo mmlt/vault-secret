@@ -20,7 +20,9 @@ func TestFakevault(t *testing.T) {
 	}), stop)
 
 	t.Run("should_not_change_Secret_that_is_not_annotated", func(t *testing.T) {
-		testCreateSecret(t, nil)
+		testCreateSecret(t, nil, map[string][]byte{
+			"shouldNotChange": []byte("value"),
+		})
 		got := testGetSecret(t)
 		assert.Equal(t, 1, len(got.Data))
 	})
@@ -30,13 +32,51 @@ func TestFakevault(t *testing.T) {
 			"vault.mmlt.nl/inject":        "true",
 			"vault.mmlt.nl/inject-path":   "path/to/secret",
 			"vault.mmlt.nl/inject-fields": "een=one,twee=two",
+		}, map[string][]byte{
+			"shouldNotChange": []byte("value"),
 		})
 		got := testGetSecret(t)
-		assert.Equal(t, 3, len(got.Data))
 		assert.Equal(t, map[string]string{
 			"een":             "first-value",
 			"twee":            "second-value",
 			"shouldNotChange": "value",
+		}, msb2mss(got.Data))
+	})
+
+	t.Run("should_set_data_fields_when_Secret_without_data_is_annotated", func(t *testing.T) {
+		testCreateSecret(t, map[string]string{
+			"vault.mmlt.nl/inject":        "true",
+			"vault.mmlt.nl/inject-path":   "path/to/secret",
+			"vault.mmlt.nl/inject-fields": "een=one,twee=two",
+		}, nil)
+		got := testGetSecret(t)
+		assert.Equal(t, map[string]string{
+			"een":  "first-value",
+			"twee": "second-value",
+		}, msb2mss(got.Data))
+	})
+
+	t.Run("should_skip_fields_that_are_not_in_vault", func(t *testing.T) {
+		testCreateSecret(t, map[string]string{
+			"vault.mmlt.nl/inject":        "true",
+			"vault.mmlt.nl/inject-path":   "path/to/secret",
+			"vault.mmlt.nl/inject-fields": "een=one,twee=xxxx",
+		}, nil)
+		got := testGetSecret(t)
+		assert.Equal(t, map[string]string{
+			"een": "first-value",
+		}, msb2mss(got.Data))
+	})
+
+	t.Run("should_skip_fields_that_are_not_in_fields_list", func(t *testing.T) {
+		testCreateSecret(t, map[string]string{
+			"vault.mmlt.nl/inject":        "true",
+			"vault.mmlt.nl/inject-path":   "path/to/secret",
+			"vault.mmlt.nl/inject-fields": "twee=two",
+		}, nil)
+		got := testGetSecret(t)
+		assert.Equal(t, map[string]string{
+			"twee": "second-value",
 		}, msb2mss(got.Data))
 	})
 
@@ -45,6 +85,8 @@ func TestFakevault(t *testing.T) {
 			"vault.mmlt.nl/inject":        "false",
 			"vault.mmlt.nl/inject-path":   "path/to/secret",
 			"vault.mmlt.nl/inject-fields": "een=one,twee=two",
+		}, map[string][]byte{
+			"shouldNotChange": []byte("value"),
 		})
 		got := testGetSecret(t)
 		assert.Equal(t, 1, len(got.Data))
@@ -54,6 +96,8 @@ func TestFakevault(t *testing.T) {
 		testCreateSecret(t, map[string]string{
 			"vault.mmlt.nl/inject-path":   "path/to/secret",
 			"vault.mmlt.nl/inject-fields": "een=one,twee=two",
+		}, map[string][]byte{
+			"shouldNotChange": []byte("value"),
 		})
 		got := testGetSecret(t)
 		assert.Equal(t, 1, len(got.Data))

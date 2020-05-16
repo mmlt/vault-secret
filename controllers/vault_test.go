@@ -16,6 +16,11 @@ import (
 )
 
 func TestVault(t *testing.T) {
+	if !useExistingCluster {
+		t.Fatal("This test requires an K8S API server that supports the tokenreview endpoint (envtest currently doesn't)")
+		// Vault kubeauth uses tokenreview
+	}
+
 	stop := make(chan struct{})
 
 	logf.SetLogger(testr.New(t))
@@ -37,13 +42,12 @@ func TestVault(t *testing.T) {
 			"vault.mmlt.nl/inject":        "true",
 			"vault.mmlt.nl/inject-path":   "secret/path/to/test",
 			"vault.mmlt.nl/inject-fields": "een=one,twee=two",
-		})
+		}, nil)
 		got := testGetSecret(t)
 		assert.Equal(t, 3, len(got.Data))
 		assert.Equal(t, map[string]string{
-			"een":             "first-vault-value",
-			"twee":            "second-vault-value",
-			"shouldNotChange": "value",
+			"een":  "first-vault-value",
+			"twee": "second-vault-value",
 		}, msb2mss(got.Data))
 
 		// debugging:

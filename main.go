@@ -53,8 +53,8 @@ Commandline flags:
 func main() {
 	vaultURL := flag.String("vault-url", "https://vault.example.com",
 		"The URL of the Vault server")
-	vaultCAFile := flag.String("vault-ca-file", "/var/run/vault/ca.pem",
-		"The path of the TLS CA")
+	vaultCAFile := flag.String("vault-ca-file", "",
+		"The path of the Vault server CA")
 	vaultTLSInsecure := flag.Bool("vault-tls-insecure", false,
 		"Allow insecure TLS connections")
 	vaultAuthPath := flag.String("vault-auth-path", "kubernetes",
@@ -67,6 +67,11 @@ func main() {
 			"Arguments: {ns} for namespace, {n} for name, {p} for the vault.mmlt.nl/inject-path annotation value")
 	metricsAddr := flag.String("metrics-addr", ":8080",
 		"The address the metric endpoint binds to.")
+	webhookCertDir := flag.String("webhook-cert-dir", "/var/run/webhook",
+		"The directory containing the webhook server tls.key and tls.crt files.")
+	webhookPort := flag.Int("webhook-port", 9443,
+		"The port the webhook server binds to.")
+
 	//enableLeaderElection := flag.Bool("enable-leader-election", false,
 	//	"Enable leader election for controller manager. "+
 	//		"Enabling this will ensure there is only one active controller manager.")
@@ -83,14 +88,18 @@ func main() {
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		//Scheme:             scheme,
 		MetricsBindAddress: *metricsAddr,
-		Port:               9443,
+		Port:               *webhookPort,
+		CertDir:            *webhookCertDir,
 		//LeaderElection:     enableLeaderElection,
 		//LeaderElectionID:   "c87fed36.mmlt.nl",
 	})
 	exitWhenError("creating manager", err)
 
-	vaultCA, err := ioutil.ReadFile(*vaultCAFile)
-	exitWhenError("reading vault-ca-file", err)
+	var vaultCA []byte
+	if *vaultCAFile != "" {
+		vaultCA, err = ioutil.ReadFile(*vaultCAFile)
+		exitWhenError("reading vault-ca-file", err)
+	}
 
 	client, err := hashivault.New(*vaultURL, string(vaultCA), *vaultTLSInsecure)
 	exitWhenError("creating Vault client", err)
@@ -102,6 +111,7 @@ func main() {
 			VaultAuthPath:   *vaultAuthPath,
 			VaultRole:       *vaultRole,
 			VaultSecretPath: *vaultSecretPath,
+			Log:             ctrl.Log,
 		},
 	})
 

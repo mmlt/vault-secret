@@ -18,6 +18,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"testing"
 )
@@ -32,8 +33,8 @@ var (
 // Tests use the following config.
 var (
 	// When true the kube/config current context cluster will be used.
-	// When false the envtest apiserver will be used (NB. doesn't support tokenreview so Vault kubeauth won't work)
-	useExistingCluster = true
+	// When false the envtest apiserver will be used (NB. envtest currently doesn't support tokenreview)
+	useExistingCluster = false
 	// Namespace and name for test resources.
 	testNSN = types.NamespacedName{
 		Namespace: "default",
@@ -86,7 +87,7 @@ func testManager(t *testing.T, vault vault.Loginer, stop <-chan struct{}) {
 
 	// Setup manager (similar to main.go)
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		//Scheme:             scheme,
 		//MetricsBindAddress: metricsAddr,
 		Host:           testEnv.WebhookInstallOptions.LocalServingHost,
@@ -96,7 +97,7 @@ func testManager(t *testing.T, vault vault.Loginer, stop <-chan struct{}) {
 	})
 	Expect(err).NotTo(HaveOccurred())
 
-	// Setup webhook.
+	// Setup webhook handler.
 	hookServer := mgr.GetWebhookServer()
 	hookServer.Register(WebhookPath, &webhook.Admission{
 		Handler: &mutator.SecretMutator{
@@ -104,6 +105,7 @@ func testManager(t *testing.T, vault vault.Loginer, stop <-chan struct{}) {
 			VaultAuthPath:   "kubernetes",
 			VaultRole:       "vaultsecret",
 			VaultSecretPath: "{p}",
+			Log:             logf.Log,
 		},
 	})
 
@@ -114,7 +116,7 @@ func testManager(t *testing.T, vault vault.Loginer, stop <-chan struct{}) {
 		Expect(err).NotTo(HaveOccurred())
 	}()
 
-	//By("waiting for webhook to be serving")
+	//By("waiting for webhook to be serving") TODO
 	t.Log("waiting for webhook to be serving")
 	o := webhookInstallOptions(WebhookPath)
 	err = envtest.WaitForWebhooks(mgr.GetConfig(), o.MutatingWebhooks, o.ValidatingWebhooks, o)
