@@ -21,6 +21,7 @@ func TestVault(t *testing.T) {
 		// Vault kubeauth uses tokenreview
 	}
 
+	t.Parallel()
 	stop := make(chan struct{})
 
 	logf.SetLogger(testr.New(t))

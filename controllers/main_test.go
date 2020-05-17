@@ -5,8 +5,7 @@ import (
 	"fmt"
 	"github.com/mmlt/vault-secret/pkg/mutator"
 	"github.com/mmlt/vault-secret/pkg/vault"
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -46,7 +45,6 @@ var (
 
 func TestMain(m *testing.M) {
 	// Setup.
-	RegisterFailHandler(Fail) //TODO remove Gomega
 
 	//logf.SetLogger(zap.LoggerTo(GinkgoWriter, true)) TODO
 
@@ -54,20 +52,18 @@ func TestMain(m *testing.M) {
 		UseExistingCluster:    &useExistingCluster,
 		WebhookInstallOptions: webhookInstallOptions(WebhookPath),
 		//AttachControlPlaneOutput: true,
-		//KubeAPIServerFlags:    append(envtest.DefaultKubeAPIServerFlags, "--log-file=/home/pietere/kube-apiserver-envtest.log", "-v=3"),
+		//KubeAPIServerFlags:    append(envtest.DefaultKubeAPIServerFlags, ),
 	}
 
 	var err error
 	cfg, err = testEnv.Start()
-	Expect(err).NotTo(HaveOccurred())
-	Expect(cfg).NotTo(BeNil())
+	mustNotErr("starting testenv", err)
 
 	err = corev1.AddToScheme(scheme.Scheme)
-	Expect(err).NotTo(HaveOccurred())
+	mustNotErr("adding schema", err)
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
-	Expect(err).NotTo(HaveOccurred())
-	Expect(k8sClient).NotTo(BeNil())
+	mustNotErr("creating client", err)
 
 	fmt.Println(cfg.Host)
 
@@ -76,7 +72,7 @@ func TestMain(m *testing.M) {
 
 	// Teardown.
 	err = testEnv.Stop()
-	Expect(err).NotTo(HaveOccurred())
+	mustNotErr("stopping testenv", err)
 
 	os.Exit(r)
 }
@@ -95,7 +91,7 @@ func testManager(t *testing.T, vault vault.Loginer, stop <-chan struct{}) {
 		CertDir:        testEnv.WebhookInstallOptions.LocalServingCertDir,
 		LeaderElection: false,
 	})
-	Expect(err).NotTo(HaveOccurred())
+	assert.NoError(t, err)
 
 	// Setup webhook handler.
 	hookServer := mgr.GetWebhookServer()
@@ -111,16 +107,14 @@ func testManager(t *testing.T, vault vault.Loginer, stop <-chan struct{}) {
 
 	// Start manager.
 	go func() {
-		defer GinkgoRecover()
 		err = mgr.Start(stop)
-		Expect(err).NotTo(HaveOccurred())
+		mustNotErr("starting manager", err)
 	}()
 
-	//By("waiting for webhook to be serving") TODO
 	t.Log("waiting for webhook to be serving")
 	o := webhookInstallOptions(WebhookPath)
 	err = envtest.WaitForWebhooks(mgr.GetConfig(), o.MutatingWebhooks, o.ValidatingWebhooks, o)
-	Expect(err).NotTo(HaveOccurred())
+	assert.NoError(t, err)
 }
 
 // WebhookInstallOptions returns the options to configure a test environment.

@@ -98,3 +98,9 @@ func msb2mss(in map[string][]byte) map[string]string {
 	}
 	return out
 }
+
+func mustNotErr(msg string, err error) {
+	if err != nil {
+		panic(msg + ": " + err.Error())
+	}
+}
