@@ -33,7 +33,7 @@ var (
 var (
 	// When true the kube/config current context cluster will be used.
 	// When false the envtest apiserver will be used (NB. envtest currently doesn't support tokenreview)
-	useExistingCluster = false
+	useExistingCluster = true
 	// Namespace and name for test resources.
 	testNSN = types.NamespacedName{
 		Namespace: "default",
@@ -99,7 +99,7 @@ func testManager(t *testing.T, vault vault.Loginer, stop <-chan struct{}) {
 		Handler: &mutator.SecretMutator{
 			Vault:           vault,
 			VaultAuthPath:   "kubernetes",
-			VaultRole:       "vaultsecret",
+			VaultRole:       "vaultsecret-{ns}",
 			VaultSecretPath: "{p}",
 			Log:             logf.Log,
 		},

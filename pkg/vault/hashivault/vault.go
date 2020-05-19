@@ -92,8 +92,23 @@ func (c *client) Get(path string) (map[string]string, error) {
 	if secret == nil {
 		return nil, fmt.Errorf("path not found: %s", path)
 	}
+
+	data := secret.Data
+
+	// handle KV version 2 data.
+	if len(data) == 2 {
+		_, d := data["data"]
+		_, md := data["metadata"]
+		if d && md {
+			d, ok := data["data"].(map[string]interface{})
+			if ok {
+				data = d
+			}
+		}
+	}
+
 	r := map[string]string{}
-	for k, v := range secret.Data {
+	for k, v := range data {
 		r[k] = fmt.Sprint(v)
 	}
 	return r, nil

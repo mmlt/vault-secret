@@ -1,5 +1,5 @@
 # Version
-VERSION ?= v0.0.2
+VERSION ?= 0.0.3
 # Image URL to use all building/pushing image targets
 IMG ?= vaultsecret:latest
 # Produce CRDs that work back to Kubernetes 1.11 (no version conversion)
