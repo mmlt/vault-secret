@@ -83,7 +83,7 @@ Controller->API: mutated Secret
 ```
 
 At `Login` the identity of the webhook controller Pod and the namespace of the target Secret are used to select a Vault role. 
-The blue lines in [flow](flow-smaller.png) show the role name is build.
+The blue lines in [flow](flow-smaller.png) show how the role name is constructed.
 
 Vault uses TokenReview to check the Login and on success returns a token.
 
