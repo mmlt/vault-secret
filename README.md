@@ -7,18 +7,24 @@ Other applications should use [Vault Agent](https://www.hashicorp.com/blog/injec
 
 ## Usage
 
-See `--help`
+### Run vaultsecret controller
 
-### Installing the controller
+Running the controller is like any admission controller.
+
+See `--help` for configuration flags.
 
 
-### Setup Vault
+### Configure Vault
 
-See `controllers/vault_test.go testVault()`
+The source is your friend, `controllers/vault_test.go testConfigureVault()` shows how to configure Vault
+kubeauth, kubenetes auth role, policy and secrets.
+
+TODO insert vault cli commands for example here
 
 
 ### Create a Secret
-To get the data fields of a Secret populated it has to be annotated;
+
+Create a Secret with annotations;
 ```yaml
 apiVersion: v1
 kind: Secret
@@ -26,44 +32,14 @@ metadata:
   name: my-secret
   annotations:
     vault.mmlt.nl/inject: "true"
-    vault.mmlt.nl/inject-path: "secret/path/to/secret"
+    vault.mmlt.nl/inject-path: "secret/data/ns/default/example"
     vault.mmlt.nl/inject-fields: "user=name,pw=password"
-
 ```
 
-## Developing: 
-Prerequisite: [kubebuilder](https://kubebuilder.io) for code generation and testenv binaries.
-
-E2E tests:
-- TestFakevault
-- TestVault with root token
-- TestVault with kubeauth won't work in envtest (because of TokenReview endpoint not working) 
-
-All E2E tests run in microk8s (set useExternalCluster = true).
+Upon creation the Secret `data` fields will be populated with values from Vault.
 
 
 ## Background
-
-
-When getting a secret from Vault the Pod identity of the webhook controller and the namespace of the target Secret are to
-select the Vault Policy.
-
-For example the following Vault role applies the Vault policy `policy-that-resticts-access-to-mynamespace` 
-when the vaultsecret webhook controller Pod named `controller-name` running in namespace `controller-namespace`
-receives a request for a Secret that is created in `mynamespace`
-```
-vault write auth/kubernetes/role/vaultsecret-mynamespace
-  bound_service_account_name = controller-name
-  bound_service_account_namespace = controller-namespace
-  policies: policy-that-resticts-access-to-mynamespace
-```
-
-The `policy-that-resticts-access-to-mynamespace` has to be created like this:
-TODO
-
-And of course the secrets have to be created:
-TODO
- 
  
 The sequence of events up-on creation of a Secret with annotations looks like this: 
 ```
@@ -106,6 +82,24 @@ Controller->Vault: Get
 Controller->API: mutated Secret
 ```
 
-## TODO
+At `Login` the identity of the webhook controller Pod and the namespace of the target Secret are used to select a Vault role. 
+The blue lines in [flow](flow-smaller.png) show the role name is build.
+
+Vault uses TokenReview to check the Login and on success returns a token.
+
+At `Get` a path is used to read a secret from Vault, ofcourse the path has to be allowed by a policy.
+The purple lines in [flow](flow-smaller.png) show the relations between `vault.mmlt.nl/inject-path`, policy and vault secret path. 
+
+When the values are successfully read from Vault what's left is a simple key rename (orange lines in [flow](flow-smaller.png))
+and update of the Secret data field before the mutated Secret is returned to the API Server.
+
+
+## Developing
+ 
+Prerequisite:
+- [kubebuilder](https://kubebuilder.io) for code generation and testenv binaries.
+
+
+## Future
 - Consider reconciling Secrets with Vault
 - Consider changing the vault.mmlt.nl/inject="true" annotation to support other vaults.

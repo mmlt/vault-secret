@@ -59,10 +59,10 @@ func main() {
 		"Allow insecure TLS connections")
 	vaultAuthPath := flag.String("vault-auth-path", "kubernetes",
 		"The path of the Vault kubeauth credential backend mount")
-	vaultRole := flag.String("vault-role", "vaultsecret",
+	vaultRole := flag.String("vault-role", "vaultsecret-{ns}",
 		"The template that results in a role name. Arguments: {ns} for namespace, {n} for name. \n"+
 			"for example \"vaultsecret-{ns}\" produces \"vaultsecret-default\" when the Secret is in namespace \"default\"")
-	vaultSecretPath := flag.String("vault-secret-path", "secret/{ns}/{p}",
+	vaultSecretPath := flag.String("vault-secret-path", "{p}",
 		"The template that results in a Vault path.\n"+
 			"Arguments: {ns} for namespace, {n} for name, {p} for the vault.mmlt.nl/inject-path annotation value")
 	metricsAddr := flag.String("metrics-addr", ":8080",
